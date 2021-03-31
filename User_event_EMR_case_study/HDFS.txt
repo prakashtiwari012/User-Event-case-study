@@ -1,0 +1,152 @@
+###Current directory
+PWD
+### get data in local master instance
+wget https://e-commerce-events-ml.s3.amazonaws.com/2019-Oct.csv
+wget https://e-commerce-events-ml.s3.amazonaws.com/2019-Nov.csv
+
+sed -i -e 's/ UTC//g' 2019-Oct.csv
+sed -i -e 's/ UTC//g' 2019-Nov.csv
+
+#####hdfs dfs -rm -R /user/hive_assignment
+hdfs dfs -ls /
+hdfs dfs -mkdir /user/hive_assignment
+hdfs dfs -put 2019-Nov.csv /user/hive_assignment/
+hdfs dfs -put 2019-Oct.csv /user/hive_assignment/
+hdfs dfs -ls /user/hive_assignment/
+hdfs dfs -cat /user/hive_assignment/2019-Nov.csv | head
+hive
+
+####set hive.execution.engine = tez;
+create database if not exists ECom comment "Created to store events done on website" with dbproperties('creator'='Prakash','date'='30-01-2021');
+show databases;
+use ecom;
+create external table if not exists event_nov (event_time timestamp,event_type string,product_id string,category_id string,category_code string,brand string,price float,user_id bigint,user_session string) row format delimited fields terminated by ',' lines terminated by '\n' stored as textfile tblproperties("skip.header.line.count"="1") ;
+
+create external table if not exists event_oct (event_time timestamp,event_type string,product_id string,category_id string,category_code string,brand string,price float,user_id bigint,user_session string) row format delimited fields terminated by ',' lines terminated by '\n' stored as textfile tblproperties("skip.header.line.count"="1") ;
+
+show tables;
+describe event_nov;
+describe event_oct;
+ 
+load data inpath '/user/hive_assignment/2019-Nov.csv' into table event_nov; 
+
+load data inpath '/user/hive_assignment/2019-Oct.csv' into table event_oct; 
+
+set hive.cli.print.header=true;
+
+##########################
+
+create table events
+as
+(
+select 'Nov' as Month,* from event_nov 
+union all
+select 'Oct' as Month,* from event_oct 
+)
+
+
+create table if not exists part_events (event_time timestamp,product_id string,category_id string,category_code string,brand string,price float,user_id bigint,user_session string) partitioned by (month string,event_type string) clustered by (product_id) into 5 buckets row format delimited fields terminated by ',' lines terminated by '\n';
+
+insert into part_events partition( month='Oct', event_type='cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Oct' and event_type='cart';
+
+insert into part_events partition( month='Oct', event_type='remove_from_cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Oct' and  event_type='remove_from_cart';
+
+insert into part_events partition( month='Oct' ,event_type='view') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Oct' and  event_type='view';
+
+insert into part_events partition( month='Oct' ,event_type='purchase') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Oct' and  event_type='purchase';
+
+
+insert into part_events partition( month='Nov', event_type='cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Nov' and event_type='cart';
+
+insert into part_events partition(month='Nov',event_type='remove_from_cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Nov' and  event_type='remove_from_cart';
+
+insert into part_events partition(month='Nov',event_type='view') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Nov' and  event_type='view';
+
+insert into part_events partition(month='Nov',event_type='purchase') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from events where month='Nov' and  event_type='purchase';
+
+hdfs dfs -ls /user/hive/warehouse/ecom.db/part_events
+
+
+###Query for performance test after partitioning and bucketing
+
+select event_type, product_id, sum(price) as total_amount from events group by event_type,product_id;
+
+select event_type, product_id, sum(price) as total_amount from part_events group by event_type,product_id;
+
+
+select sum(price)  as Total_Revenue_from_purchases from events where month='Oct' and event_type='purchase';
+
+select sum(price)  as Total_Revenue_from_purchases from part_events where month='Oct' and event_type='purchase';
+
+###Query Q1
+
+select sum(price)  as Total_Revenue_from_purchases from events where month='Oct' and event_type='purchase';
+
+select sum(price)  as Total_Revenue_from_purchases from part_events where month='Oct' and event_type='purchase';
+
+###Query Q2
+select month, sum(price)  as Sum_of_purchases  from part_events where  event_type='purchase' group by month ;
+
+###Query Q3
+
+set hive.strict.checks.cartesian.product = False
+
+
+###Static
+
+create table if not exists part_event_oct (event_time timestamp,product_id string,category_id string,category_code string,brand string,price float,user_id bigint,user_session string) partitioned by (event_type string) row format delimited fields terminated by ',' lines terminated by '\n';
+
+insert into part_event_oct partition(event_type='cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_oct where event_type='cart';
+
+insert into part_event_oct partition(event_type='remove_from_cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_oct where event_type='remove_from_cart';
+
+insert into part_event_oct partition(event_type='view') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_oct where event_type='view';
+
+insert into part_event_oct partition(event_type='purchase') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_oct where event_type='purchase';
+
+hdfs dfs -ls /user/hive/warehouse/ecom.db/part_event_oct
+
+
+create table if not exists part_event_nov (event_time timestamp,product_id string,category_id string,category_code string,brand string,price float,user_id bigint,user_session string) partitioned by (event_type string) row format delimited fields terminated by ',' lines terminated by '\n';
+
+insert into part_event_nov partition(event_type='cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_nov where event_type='cart';
+
+insert into part_event_nov partition(event_type='remove_from_cart') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_nov where event_type='remove_from_cart';
+
+insert into part_event_nov partition(event_type='view') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_nov where event_type='view';
+
+insert into part_event_nov partition(event_type='purchase') select event_time,product_id,category_id,category_code,brand,price,user_id, user_session from event_nov where event_type='purchase';
+
+
+### Drop partition
+alter table event_nov drop partition(event_type='cart');
+
+###Dynamic
+SET hive.exec.dynamic.partition=true;
+SET hive.exec.dynamic.partition.mode=nonstrict;
+
+SET hive.exec.max.dynamic.partitions=1000;
+SET hive.exec.max.dynamic.partitions.pernode=1000;
+
+set hive.vectorized.execution.enabled=false;
+
+set hive.vectorized.execution.reduce.enabled=false;
+
+create table if not exists part_events (event_time timestamp,product_id string,category_id string,category_code string,brand string,price float,user_id bigint,user_session string) partitioned by (event_type string) row format delimited fields terminated by ',' lines terminated by '\n';
+
+insert into part_events partition(event_type) select event_time,event_type,product_id,category_id,category_code,brand,price,user_id, user_session from events;
+
+###Query
+
+select event_type, sum(price) as total_amount from event_nov group by event_type;
+select event_type, sum(price) as total_amount from part_event_nov group by event_type;
+
+
+select sum(price)  as Total_Revenue_from_purchases from events where event_type='purchase' and month=10;
+select sum(price)  as Total_Revenue_from_purchases from event_oct where event_type='purchase';
+select sum(price)  as Total_Revenue_from_purchases from part_event_oct where event_type='purchase'; 
+
+select 'Nov' as month,sum(price) as Total_Revenue_from_purchases from event_nov where event_type='purchase' union all select 'Oct',sum(price) as Total_Revenue_from_purchases from event_oct where event_type='purchase' 
+select case when month==10 then 'oct' else 'nov' end as month ,sum(price) as Total_Revenue_from_purchases from events where event_type='purchase' group by month 
+select 'Nov' as month,sum(price) as Total_Revenue_from_purchases from part_event_nov where event_type='purchase' union all select 'Oct',sum(price) as Total_Revenue_from_purchases from part_event_oct where event_type='purchase' 
+
